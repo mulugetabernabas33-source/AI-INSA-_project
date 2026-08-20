@@ -1,85 +1,153 @@
+# Vehicle & License-Plate Detection
 
+A two-stage YOLOv8 cascade pipeline for detecting vehicles and localizing their license plates in traffic-camera imagery.
 
+![Status](https://img.shields.io/badge/status-complete-2ea44f)
+![Framework](https://img.shields.io/badge/framework-Ultralytics%20YOLOv8-0f1f3d)
+![Hardware](https://img.shields.io/badge/trained%20on-NVIDIA%20T4%20GPU-76b900)
+![Group](https://img.shields.io/badge/group-12-C9A227)
 
-Vehicle & License-Plate Detection
-A two-stage YOLOv8 cascade pipeline that detects vehicles in traffic-camera imagery, then localizes license plates within each detected vehicle.
+## Results
 
-Group 12 · AI Engineering Coursework · Trained on Google Colab (Tesla T4 GPU)
+| Vehicle mAP@50 | Plate mAP@50 | Vehicle Speed | GPU Speedup |
+| -------------: | -----------: | ------------: | ----------: |
+|      **96.9%** |    **95.7%** |   **104 FPS** |     **19×** |
 
-Table of Contents
-Overview
-Results
-Data
-Architecture & Training
-Cascade Pipeline in Action
-Repository Structure
-Reproducing This
-Concepts Demonstrated
-Overview
-Instead of training a single detector to find both vehicles and plates at once, this project uses a coarse-to-fine cascade:
+## Overview
 
-Full frame -> [Stage 1: Vehicle Detector] -> crop each vehicle
-            -> [Stage 2: Plate Detector]   -> locate plate within crop
-Why a cascade? A license plate occupies well under 1% of a full traffic-camera frame. Detecting it directly in the full image is a classic small-object detection problem. By first cropping to each vehicle, the plate becomes a much larger, easier target, turning one hard problem into two easier ones.
+This project uses a **two-stage YOLOv8 cascade**:
 
-Results
-Detection Accuracy
-Metric	Vehicle Model	Plate Model
-mAP@50	0.969	0.957
-mAP@50-95	0.771	0.625
-Precision	0.924	0.978
-Recall	0.921	0.931
-Training time	~16.6 min	~7 min (early-stopped)
-Inference Speed — CPU vs GPU
-Model	Device	Latency	FPS	Real-time (>15 FPS)
-Vehicle	GPU (T4)	9.63 ms	103.8	Yes
-Vehicle	CPU	185.51 ms	5.4	No
-Plate	GPU (T4)	7.82 ms	128.0	Yes
-Plate	CPU	59.06 ms	16.9	Yes (marginal)
-GPU inference is roughly 19x faster for vehicle detection and 7.5x faster for plate detection, confirming GPU acceleration is effectively required for real-time deployment.
+```text
+Full Frame
+    ↓
+Vehicle Detector
+    ↓
+Crop Each Vehicle
+    ↓
+License Plate Detector
+    ↓
+Plate Localized
+```
 
-Data
-Stage	Dataset	Source	Used
-Vehicle	UA-DETRAC-DATASET-10K	Roboflow Universe	2,000 train / 500 val
-Plate	License Plate Recognition v4	Roboflow Universe	2,000 train / 500 val
-CCPD was deliberately avoided, as it is Chinese-plate specific and not representative of general license plates.
+### Why a Cascade?
 
-All labels use the YOLO format (class x_center y_center width height, normalized 0-1). The raw UA-DETRAC export contains four vehicle sub-classes (car/bus/van/others); these were remapped to a single vehicle class since the task is detection, not classification.
+License plates are very small objects in traffic-camera images. Detecting them directly from the full image is difficult.
 
-Architecture & Training
-Model: YOLOv8n (nano), fine-tuned from COCO-pretrained weights
-Framework: Ultralytics
-Hardware: Google Colab, NVIDIA Tesla T4 GPU
-Setting	Vehicle Stage	Plate Stage
-Image size	640 px	416 px
-Batch size	16	32
-Epochs (max / patience)	30 / 8	30 / 8
-Optimizer	AdamW (auto)	AdamW (auto)
-The nano variant was chosen deliberately as a speed-accuracy tradeoff. It trains and runs fast while still achieving over 95% mAP@50 on this constrained, single-class task.
+The first model detects vehicles and crops them. The second model then searches for license plates inside those vehicle crops, making the plates much easier to detect.
 
-Cascade Pipeline in Action
-The pipeline was tested across multiple validation images:
+## Detection Accuracy
 
-Scene	Vehicles Found	Plates Found	Explanation
-Wide highway, distant traffic	19	1	Most vehicles too small or far for plate pixels to resolve
-Closer urban intersection	13	5	Plates reliably detected near the camera
-This is not a failure of the pipeline. It illustrates the small-object detection tradeoff directly: the cascade correctly narrows the search area per vehicle, but final plate visibility remains bounded by pixel resolution at capture distance.
+| Metric        | Vehicle Model | Plate Model |
+| ------------- | ------------: | ----------: |
+| mAP@50        |         0.969 |       0.957 |
+| mAP@50-95     |         0.771 |       0.625 |
+| Precision     |         0.924 |       0.978 |
+| Recall        |         0.921 |       0.931 |
+| Training Time |      16.6 min |       7 min |
 
-Repository Structure
+## Inference Speed
+
+| Model   | Device        |   Latency |       FPS |
+| ------- | ------------- | --------: | --------: |
+| Vehicle | NVIDIA T4 GPU |   9.63 ms | **103.8** |
+| Vehicle | CPU           | 185.51 ms |       5.4 |
+| Plate   | NVIDIA T4 GPU |   7.82 ms | **128.0** |
+| Plate   | CPU           |  59.06 ms |      16.9 |
+
+GPU inference was approximately **19× faster for vehicle detection** and **7.5× faster for plate detection**.
+
+## Dataset
+
+| Stage   | Dataset                      | Train | Validation |
+| ------- | ---------------------------- | ----: | ---------: |
+| Vehicle | UA-DETRAC-DATASET-10K        | 2,000 |        500 |
+| Plate   | License Plate Recognition v4 | 2,000 |        500 |
+
+* [UA-DETRAC-DATASET-10K](https://universe.roboflow.com/rjacaac1/ua-detrac-dataset-10k)
+* [License Plate Recognition v4](https://universe.roboflow.com/roboflow-universe-projects/license-plate-recognition-rxg4e)
+
+CCPD was not used because it is focused on Chinese license plates.
+
+The vehicle dataset classes (`car`, `bus`, `van`, `others`) were combined into a single `vehicle` class.
+
+### YOLO Format
+
+```text
+class x_center y_center width height
+```
+
+All coordinates are normalized between `0` and `1`.
+
+### COCO to YOLO Conversion
+
+```text
+x_center = (x_min + width / 2) / img_width
+y_center = (y_min + height / 2) / img_height
+width    = width / img_width
+height   = height / img_height
+```
+
+## Architecture & Training
+
+* **Model:** YOLOv8n
+* **Framework:** [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
+* **Hardware:** NVIDIA Tesla T4
+* **Platform:** Google Colab
+* **Pretrained weights:** COCO
+
+| Setting    | Vehicle | Plate |
+| ---------- | ------: | ----: |
+| Image Size |     640 |   416 |
+| Batch Size |      16 |    32 |
+| Epochs     |      30 |    30 |
+| Patience   |       8 |     8 |
+| Optimizer  |   AdamW | AdamW |
+
+YOLOv8n was selected because it provides a good balance between speed and accuracy.
+
+## Pipeline Examples
+
+| Scene                         | Vehicles Found | Plates Found |
+| ----------------------------- | -------------: | -----------: |
+| Wide highway, distant traffic |             19 |            1 |
+| Closer urban intersection     |             13 |            5 |
+
+The lower number of detected plates in distant scenes is mainly caused by limited pixel resolution. Even after vehicle cropping, extremely small or distant plates may not contain enough visual information for reliable detection.
+
+## Repository Structure
+
+```text
 .
-├── vehicle_plate_detection.ipynb        Full notebook: data prep, training, cascade, benchmark
-├── Vehicle_Plate_Detection_Report.pdf   Full written report
+├── vehicle_plate_detection.ipynb
+├── Vehicle_Plate_Detection_Report.pdf
 └── README.md
-Reproducing This
-Open the notebook in Google Colab.
-Set the runtime: Runtime -> Change runtime type -> T4 GPU.
-Run all cells top to bottom. This installs dependencies, pulls both datasets from Roboflow, trains both stages, and benchmarks CPU vs GPU inference.
-Trained weights are automatically backed up to Google Drive under /plate_project_backup/.
-Concepts Demonstrated
-COCO to YOLO annotation formats — conversion math and practical application
-mAP interpretation — IoU, Precision/Recall, mAP@50 vs mAP@50-95
-Small-object detection — the core reason the cascade architecture exists
-Speed-accuracy tradeoffs — model size, dataset subsetting, and the measured CPU/GPU benchmark
-Built with Ultralytics YOLOv8. Trained on Google Colab.
+```
 
+## How to Run
 
+1. Open `vehicle_plate_detection.ipynb` in [Google Colab](https://colab.research.google.com/).
+2. Select **Runtime → Change runtime type → T4 GPU**.
+3. Run all cells.
+4. The notebook installs dependencies, downloads the datasets, trains both models, runs the cascade, and benchmarks CPU/GPU performance.
+5. Trained weights are backed up to:
+
+```text
+/plate_project_backup/
+```
+
+## Concepts Demonstrated
+
+* YOLO annotation format
+* COCO to YOLO conversion
+* Object detection
+* Two-stage detection pipelines
+* Small-object detection
+* mAP@50 and mAP@50-95
+* Precision and Recall
+* CPU vs GPU inference
+* Speed-accuracy tradeoffs
+* YOLOv8 model training
+
+---
+
+**Built with Ultralytics YOLOv8 and Google Colab.**
